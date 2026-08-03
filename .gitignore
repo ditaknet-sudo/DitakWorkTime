@@ -1,0 +1,17 @@
+node_modules/
+dist/
+bin/
+obj/
+vendor/
+.env
+backups/
+*.user
+.DS_Store
+src/Admin/storage/logs/*
+src/Admin/storage/framework/cache/*
+src/Admin/storage/framework/sessions/*
+src/Admin/storage/framework/views/*
+!src/Admin/storage/logs/.gitkeep
+!src/Admin/storage/framework/cache/.gitkeep
+!src/Admin/storage/framework/sessions/.gitkeep
+!src/Admin/storage/framework/views/.gitkeep

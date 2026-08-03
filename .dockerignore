@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/vendor/
+**/.git/
+**/backups/
+**/.env
+**/dist/
+**/*.md
+src/Admin/.editorconfig
+src/Admin/.gitattributes
+src/Admin/.gitignore
+src/Admin/.npmrc
+src/Admin/tests/
+src/Web/src/Admin/

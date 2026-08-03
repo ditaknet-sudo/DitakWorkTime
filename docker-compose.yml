@@ -1,0 +1,116 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-attendance}
+      POSTGRES_USER: ${POSTGRES_USER:-attendance}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-attendance} -d ${POSTGRES_DB:-attendance}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  api:
+    build:
+      context: .
+      dockerfile: src/Api/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB:-attendance};Username=${POSTGRES_USER:-attendance};Password=${POSTGRES_PASSWORD}
+      Jwt__Secret: ${JWT_SECRET:?JWT_SECRET is required}
+      Jwt__Issuer: ${JWT_ISSUER:-DitakWorkTime}
+      Jwt__Audience: ${JWT_AUDIENCE:-DitakWorkTimeWeb}
+      Jwt__ExpiresMinutes: ${JWT_EXPIRES_MINUTES:-480}
+      Company__Name: ${COMPANY_NAME:-Company}
+      Company__Timezone: ${COMPANY_TIMEZONE:-UTC}
+      Seed__AdminEmail: ${SEED_ADMIN_EMAIL:-admin@company.local}
+      Seed__AdminPassword: ${SEED_ADMIN_PASSWORD:-ChangeMe123!}
+      Seed__AdminName: ${SEED_ADMIN_NAME:-System Admin}
+      Cors__Origins: ${CORS_ORIGINS:-http://localhost}
+      Product__Version: ${PRODUCT_VERSION:-1.0.0}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  worker:
+    build:
+      context: .
+      dockerfile: src/Worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB:-attendance};Username=${POSTGRES_USER:-attendance};Password=${POSTGRES_PASSWORD}
+      Company__Timezone: ${COMPANY_TIMEZONE:-UTC}
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - internal
+
+  web:
+    build:
+      context: .
+      dockerfile: src/Web/Dockerfile
+    restart: unless-stopped
+    networks:
+      - internal
+
+  admin:
+    build:
+      context: .
+      dockerfile: src/Admin/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      APP_DEBUG: ${APP_DEBUG:-false}
+      APP_KEY: ${APP_KEY:-base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      APP_URL: ${ADMIN_PUBLIC_URL:-http://localhost/admin}
+      API_BASE_URL: ${API_BASE_URL:-http://api:8080}
+      CACHE_STORE: file
+      SESSION_DRIVER: file
+      SESSION_PATH: /admin
+      TRUSTED_PROXIES: "*"
+      LOG_CHANNEL: stderr
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - internal
+
+  proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+      - web
+      - admin
+    networks:
+      - internal
+
+volumes:
+  # INFORMATIONAL DATA — never remove this volume during product updates
+  db_data:
+    name: attendance_db_data
+
+networks:
+  internal:
+    driver: bridge
