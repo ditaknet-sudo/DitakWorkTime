@@ -46,18 +46,62 @@ public class AttendanceService
             throw new InvalidOperationException("Network source cannot create billing attendance events.");
         }
 
+        if (string.IsNullOrWhiteSpace(cmd.IdempotencyKey) || cmd.IdempotencyKey.Length > 100)
+        {
+            throw new InvalidOperationException("Idempotency key is required and must not exceed 100 characters.");
+        }
+
+        if (cmd.DeviceId?.Length > 100 || cmd.Note?.Length > 500)
+        {
+            throw new InvalidOperationException("Attendance metadata is too long.");
+        }
+
         var existing = await _db.AttendanceEvents
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.IdempotencyKey == cmd.IdempotencyKey, ct);
         if (existing is not null)
         {
-            return existing;
+            if (existing.EmployeeId == cmd.EmployeeId && existing.EventType == type)
+            {
+                return existing;
+            }
+
+            throw new InvalidOperationException("Idempotency key was already used for another attendance event.");
         }
 
         var employee = await _db.Employees.FirstOrDefaultAsync(x => x.Id == cmd.EmployeeId && x.IsActive, ct)
             ?? throw new InvalidOperationException("Employee not found or inactive.");
 
+        if (cmd.SiteId.HasValue && !await _db.Sites.AnyAsync(x => x.Id == cmd.SiteId && x.IsActive, ct))
+        {
+            throw new InvalidOperationException("Site not found or inactive.");
+        }
+
         var occurred = cmd.OccurredAtUtc ?? DateTimeOffset.UtcNow;
+        if (cmd.Source != AttendanceEventSource.AutoCheckout && occurred > DateTimeOffset.UtcNow.AddMinutes(5))
+        {
+            throw new InvalidOperationException("Attendance event cannot be recorded in the future.");
+        }
+
+        if (cmd.Source is AttendanceEventSource.Web or AttendanceEventSource.Qr)
+        {
+            var last = await _db.AttendanceEvents.AsNoTracking()
+                .Where(x => x.EmployeeId == employee.Id && x.Source != AttendanceEventSource.Network)
+                .OrderByDescending(x => x.OccurredAtUtc)
+                .ThenByDescending(x => x.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+
+            if (type == AttendanceEventType.In && last?.EventType == AttendanceEventType.In)
+            {
+                throw new InvalidOperationException("Employee is already checked in.");
+            }
+
+            if (type == AttendanceEventType.Out && last?.EventType != AttendanceEventType.In)
+            {
+                throw new InvalidOperationException("Employee is not checked in.");
+            }
+        }
+
         var entity = new AttendanceEvent
         {
             Id = Guid.NewGuid(),
@@ -76,6 +120,68 @@ public class AttendanceService
         await _db.SaveChangesAsync(ct);
         await RecalculateEmployeeAsync(employee.Id, ct);
         return entity;
+    }
+
+    /// <summary>
+    /// Closes shifts left open past the employee company's local midnight.
+    /// The generated event is timestamped at midnight, even if the worker
+    /// catches up later after downtime.
+    /// </summary>
+    public async Task<int> AutoCloseOpenShiftsAsync(DateTimeOffset? asOfUtc = null, CancellationToken ct = default)
+    {
+        var now = asOfUtc ?? DateTimeOffset.UtcNow;
+        var timezone = AttendanceCalculator.ResolveTimezone(_companyTimezone);
+        var currentLocalDate = AttendanceCalculator.ToLocalDate(now, timezone);
+        var employeeIds = await _db.Employees.AsNoTracking()
+            .Where(x => x.IsActive)
+            .Select(x => x.Id)
+            .ToListAsync(ct);
+
+        var lastEvents = await _db.AttendanceEvents.AsNoTracking()
+            .Where(x => employeeIds.Contains(x.EmployeeId) && x.Source != AttendanceEventSource.Network)
+            .OrderByDescending(x => x.OccurredAtUtc)
+            .ThenByDescending(x => x.CreatedAt)
+            .ToListAsync(ct);
+        var lastByEmployee = lastEvents
+            .GroupBy(x => x.EmployeeId)
+            .ToDictionary(x => x.Key, x => x.First());
+
+        var closed = 0;
+        foreach (var employeeId in employeeIds)
+        {
+            if (!lastByEmployee.TryGetValue(employeeId, out var last) || last.EventType != AttendanceEventType.In)
+            {
+                continue;
+            }
+
+            var workDate = AttendanceCalculator.ToLocalDate(last.OccurredAtUtc, timezone);
+            if (workDate >= currentLocalDate)
+            {
+                continue;
+            }
+
+            var closeAtUtc = GetNextLocalMidnightUtc(workDate, timezone);
+            await CheckOutAsync(new AttendanceCommand(
+                employeeId,
+                AttendanceEventSource.AutoCheckout,
+                last.SiteId,
+                null,
+                null,
+                $"auto-checkout:{employeeId:N}:{workDate:yyyyMMdd}",
+                "Automatic checkout at local midnight",
+                closeAtUtc), ct);
+            closed++;
+        }
+
+        return closed;
+    }
+
+    public static DateTimeOffset GetNextLocalMidnightUtc(DateOnly workDate, TimeZoneInfo timezone)
+    {
+        var localMidnight = DateTime.SpecifyKind(
+            workDate.AddDays(1).ToDateTime(TimeOnly.MinValue),
+            DateTimeKind.Unspecified);
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localMidnight, timezone), TimeSpan.Zero);
     }
 
     public async Task RecalculateEmployeeAsync(Guid employeeId, CancellationToken ct = default)

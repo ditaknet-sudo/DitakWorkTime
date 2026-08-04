@@ -11,13 +11,13 @@ mkdir -p "$BACKUP_DIR"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 OUT="${BACKUP_DIR}/attendance_${STAMP}.sql.gz"
 
-if ! docker compose ps db --status running >/dev/null 2>&1; then
+if [ -z "$(docker compose ps -q --status running db)" ]; then
   echo "ERROR: db service is not running."
   exit 1
 fi
 
-# shellcheck disable=SC1091
-. ./.env
+DB_USER="$(docker compose exec -T db printenv POSTGRES_USER)"
+DB_NAME="$(docker compose exec -T db printenv POSTGRES_DB)"
 
-docker compose exec -T db pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" | gzip > "$OUT"
+docker compose exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" | gzip > "$OUT"
 echo "Backup written: $OUT"

@@ -1,7 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY src/Web/package.json src/Web/package-lock.json* ./
-RUN npm install
+RUN npm ci
 COPY src/Web/ ./
 ENV VITE_API_BASE=/api
 RUN npm run build

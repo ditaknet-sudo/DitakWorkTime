@@ -15,14 +15,15 @@ services:
       retries: 10
     networks:
       - internal
+    stop_grace_period: 30s
 
   api:
     build:
       context: .
       dockerfile: src/Api/Dockerfile
     restart: unless-stopped
+    init: true
     environment:
-      ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB:-attendance};Username=${POSTGRES_USER:-attendance};Password=${POSTGRES_PASSWORD}
       Jwt__Secret: ${JWT_SECRET:?JWT_SECRET is required}
       Jwt__Issuer: ${JWT_ISSUER:-DitakWorkTime}
@@ -31,7 +32,7 @@ services:
       Company__Name: ${COMPANY_NAME:-Company}
       Company__Timezone: ${COMPANY_TIMEZONE:-UTC}
       Seed__AdminEmail: ${SEED_ADMIN_EMAIL:-admin@company.local}
-      Seed__AdminPassword: ${SEED_ADMIN_PASSWORD:-ChangeMe123!}
+      Seed__AdminPassword: ${SEED_ADMIN_PASSWORD:?SEED_ADMIN_PASSWORD is required}
       Seed__AdminName: ${SEED_ADMIN_NAME:-System Admin}
       Cors__Origins: ${CORS_ORIGINS:-http://localhost}
       Product__Version: ${PRODUCT_VERSION:-1.0.0}
@@ -43,6 +44,11 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+      start_period: 15s
+    volumes:
+      - api_keys:/home/app/.aspnet/DataProtection-Keys
+    security_opt:
+      - no-new-privileges:true
     networks:
       - internal
 
@@ -51,6 +57,7 @@ services:
       context: .
       dockerfile: src/Worker/Dockerfile
     restart: unless-stopped
+    init: true
     environment:
       ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB:-attendance};Username=${POSTGRES_USER:-attendance};Password=${POSTGRES_PASSWORD}
       Company__Timezone: ${COMPANY_TIMEZONE:-UTC}
@@ -59,6 +66,14 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -aq dotnet /proc/[0-9]*/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
     networks:
       - internal
 
@@ -67,6 +82,14 @@ services:
       context: .
       dockerfile: src/Web/Dockerfile
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
     networks:
       - internal
 
@@ -75,10 +98,11 @@ services:
       context: .
       dockerfile: src/Admin/Dockerfile
     restart: unless-stopped
+    init: true
     environment:
       APP_ENV: production
       APP_DEBUG: ${APP_DEBUG:-false}
-      APP_KEY: ${APP_KEY:-base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      APP_KEY: ${APP_KEY:?APP_KEY is required}
       APP_URL: ${ADMIN_PUBLIC_URL:-http://localhost/admin}
       API_BASE_URL: ${API_BASE_URL:-http://api:8080}
       CACHE_STORE: file
@@ -89,6 +113,14 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "php -r \"exit(@file_get_contents('http://127.0.0.1/up') === false ? 1 : 0);\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
     networks:
       - internal
 
@@ -96,13 +128,24 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
-      - "${HOST_PORT:-8888}:80"
+      - "${HOST_BIND_IP:-127.0.0.1}:${HOST_PORT:-8888}:80"
     volumes:
       - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - api
-      - web
-      - admin
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
     networks:
       - internal
 
@@ -110,6 +153,8 @@ volumes:
   # INFORMATIONAL DATA — never remove this volume during product updates
   db_data:
     name: attendance_db_data
+  api_keys:
+    name: attendance_api_keys
 
 networks:
   internal:

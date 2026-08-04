@@ -76,7 +76,8 @@ public enum AttendanceEventSource
     Web = 1,
     Qr = 2,
     Manual = 3,
-    Network = 4
+    Network = 4,
+    AutoCheckout = 5
 }
 
 public class AttendanceEvent

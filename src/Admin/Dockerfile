@@ -14,15 +14,15 @@ COPY src/Admin/artisan ./artisan
 COPY src/Admin/phpunit.xml ./phpunit.xml
 RUN composer dump-autoload --optimize \
     && mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
-    && chmod -R 777 storage bootstrap/cache
+    && chmod -R ug+rwX storage bootstrap/cache
 
-FROM php:8.4-cli-bookworm AS final
+FROM php:8.4-apache-bookworm AS final
 WORKDIR /app
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libzip-dev unzip \
-    && docker-php-ext-install pcntl \
-    && rm -rf /var/lib/apt/lists/*
+COPY deploy/apache/servername.conf /etc/apache2/conf-available/servername.conf
+RUN a2enmod rewrite headers \
+    && a2enconf servername
 COPY --from=vendor /app /app
+COPY deploy/apache/ditak-admin.conf /etc/apache2/sites-available/000-default.conf
+RUN chown -R www-data:www-data storage bootstrap/cache
 ENV APP_ENV=production
-EXPOSE 8080
-CMD ["php", "-S", "0.0.0.0:8080", "-t", "public", "public/router.php"]
+EXPOSE 80

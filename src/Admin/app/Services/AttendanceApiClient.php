@@ -60,6 +60,11 @@ class AttendanceApiClient
         return $this->get($token, '/api/admin/users');
     }
 
+    public function createUser(string $token, array $payload): array
+    {
+        return $this->post($token, '/api/admin/users', $payload);
+    }
+
     public function manualAttendance(string $token, array $payload): array
     {
         return $this->post($token, '/api/admin/attendance/manual', $payload);

@@ -1,20 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, getToken, setToken, type AuthUser } from './api'
-
-type ThemeMode = 'system' | 'light' | 'dark'
-
-type AuthState = {
-  user: AuthUser | null
-  loading: boolean
-  login: (email: string, password: string) => Promise<void>
-  logout: () => void
-  setLanguage: (lang: string) => Promise<void>
-  setTheme: (theme: ThemeMode) => Promise<void>
-  refresh: () => Promise<void>
-}
-
-const AuthContext = createContext<AuthState | null>(null)
+import { AuthContext, type AuthState, type ThemeMode } from './auth-context'
 
 function applyTheme(theme: ThemeMode) {
   const root = document.documentElement
@@ -29,7 +16,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     if (!getToken()) {
       setUser(null)
       setLoading(false)
@@ -47,7 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [i18n])
 
   useEffect(() => {
     const savedTheme = (localStorage.getItem('theme') as ThemeMode) || 'system'
@@ -60,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
-  }, [])
+  }, [refresh])
 
   const value = useMemo<AuthState>(
     () => ({
@@ -94,14 +81,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [user, loading, i18n],
+    [user, loading, i18n, refresh],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('AuthProvider missing')
-  return ctx
 }

@@ -37,8 +37,12 @@ public sealed class RecalculationWorker : BackgroundService
             {
                 using var scope = _scopeFactory.CreateScope();
                 var attendance = scope.ServiceProvider.GetRequiredService<AttendanceService>();
+                var autoClosed = await attendance.AutoCloseOpenShiftsAsync(ct: stoppingToken);
                 await attendance.RecalculateAllAsync(stoppingToken);
-                _logger.LogInformation("Attendance recalculation completed at {Utc}", DateTimeOffset.UtcNow);
+                _logger.LogInformation(
+                    "Attendance maintenance completed at {Utc}; auto-closed shifts: {AutoClosed}",
+                    DateTimeOffset.UtcNow,
+                    autoClosed);
             }
             catch (Exception ex)
             {

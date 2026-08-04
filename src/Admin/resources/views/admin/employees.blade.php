@@ -18,6 +18,7 @@
             </tbody>
         </table>
     </div>
+    @if(in_array('Admin', session('api_user.roles', []), true))
     <div class="panel">
         <h2>Add employee</h2>
         <form method="post" action="{{ route('employees.store') }}">
@@ -36,5 +37,6 @@
             <button type="submit">Create via API</button>
         </form>
     </div>
+    @endif
 </div>
 @endsection

@@ -10,6 +10,13 @@ export type AuthUser = {
   roles: string[]
 }
 
+export type EmployeeListItem = {
+  id: string
+  fullName: string
+  employeeCode: string
+  department?: string
+}
+
 function apiBase() {
   return import.meta.env.VITE_API_BASE || '/api'
 }
@@ -31,8 +38,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   const res = await fetch(`${apiBase()}${path}`, { ...init, headers })
   if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || res.statusText)
+    const body = await res.text()
+    try {
+      const parsed = JSON.parse(body) as { error?: string; detail?: string; title?: string }
+      throw new Error(parsed.error || parsed.detail || parsed.title || res.statusText)
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new Error(body || res.statusText)
+      throw error
+    }
   }
   if (res.status === 204) return undefined as T
   const ct = res.headers.get('content-type') || ''
@@ -88,6 +101,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({}),
     }),
+  // All active employees — accessible to Admin, Manager, Director, Accountant
+  employees: () =>
+    request<EmployeeListItem[]>('/employees'),
   monthly: (employeeId: string, year: number, month: number) =>
     request<{
       employeeId: string
@@ -105,4 +121,24 @@ export function formatHours(minutes: number) {
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
   return `${h}:${m.toString().padStart(2, '0')}`
+}
+
+/** Returns initials from a display name e.g. "John Smith" → "JS" */
+export function getInitials(name: string) {
+  return name.split(' ').map(w => w[0]?.toUpperCase() ?? '').slice(0, 2).join('')
+}
+
+/** Returns role badge CSS class */
+export function getRoleBadgeClass(role: string): string {
+  const map: Record<string, string> = {
+    Admin: 'admin', Director: 'director', Accountant: 'accountant',
+    Manager: 'manager', Employee: 'employee',
+  }
+  return map[role] ?? 'muted'
+}
+
+/** Returns primary role by priority */
+export function getPrimaryRole(roles: string[]): string {
+  const priority = ['Admin', 'Director', 'Accountant', 'Manager', 'Employee']
+  return priority.find(r => roles.includes(r)) ?? roles[0] ?? 'Employee'
 }

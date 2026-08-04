@@ -29,14 +29,19 @@
 <body>
 <div class="wrap">
     @if(session()->has('api_token'))
+        @php
+            $panelRoles = session('api_user.roles', []);
+            $isAdmin = in_array('Admin', $panelRoles, true);
+            $canOperate = $isAdmin || in_array('Manager', $panelRoles, true);
+        @endphp
         <div class="top">
-            <div class="brand">Ditak WorkTime Admin</div>
+            <div class="brand">Ditak WorkTime Control Panel</div>
             <nav>
                 <a href="{{ route('dashboard') }}">Dashboard</a>
                 <a href="{{ route('employees') }}">Employees</a>
                 <a href="{{ route('sites') }}">Sites</a>
-                <a href="{{ route('users') }}">Users</a>
-                <a href="{{ route('manual') }}">Manual</a>
+                @if($isAdmin)<a href="{{ route('users') }}">Users</a>@endif
+                @if($canOperate)<a href="{{ route('manual') }}">Manual</a>@endif
                 <a href="{{ route('reports') }}">Reports</a>
             </nav>
             <form method="post" action="{{ route('logout') }}">

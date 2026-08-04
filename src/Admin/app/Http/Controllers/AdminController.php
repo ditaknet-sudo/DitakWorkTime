@@ -44,8 +44,9 @@ class AdminController extends Controller
         try {
             $result = $this->api()->login($data['email'], $data['password']);
             $roles = $result['user']['roles'] ?? [];
-            if (! in_array('Admin', $roles, true) && ! in_array('Manager', $roles, true)) {
-                return back()->withErrors(['email' => 'Admin or Manager role required.'])->withInput();
+            $allowed = ['Admin', 'Manager', 'Director', 'Accountant'];
+            if (array_intersect($allowed, $roles) === []) {
+                return back()->withErrors(['email' => 'Control-panel role required.'])->withInput();
             }
 
             Session::put('api_token', $result['token']);
@@ -144,11 +145,40 @@ class AdminController extends Controller
     {
         try {
             $users = $this->api()->users($this->token());
+            $employees = $this->api()->employees($this->token());
         } catch (RuntimeException $e) {
             return back()->withErrors(['api' => $e->getMessage()]);
         }
 
-        return view('admin.users', compact('users'));
+        $employees = array_values(array_filter($employees, fn (array $employee) => empty($employee['userId'])));
+
+        return view('admin.users', compact('users', 'employees'));
+    }
+
+    public function storeUser(Request $request)
+    {
+        $data = $request->validate([
+            'email' => ['required', 'email', 'max:256'],
+            'displayName' => ['required', 'string', 'max:200'],
+            'password' => ['required', 'string', 'min:12', 'max:128', 'confirmed'],
+            'roles' => ['required', 'array', 'min:1'],
+            'roles.*' => ['required', 'in:Admin,Manager,Director,Accountant,Employee'],
+            'employeeId' => ['nullable', 'uuid'],
+        ]);
+
+        try {
+            $this->api()->createUser($this->token(), [
+                'email' => $data['email'],
+                'displayName' => $data['displayName'],
+                'password' => $data['password'],
+                'roles' => array_values($data['roles']),
+                'employeeId' => ($data['employeeId'] ?? null) ?: null,
+            ]);
+        } catch (RuntimeException $e) {
+            return back()->withErrors(['api' => $e->getMessage()])->withInput();
+        }
+
+        return redirect()->route('users')->with('status', 'User created.');
     }
 
     public function manualForm()

@@ -12,4 +12,6 @@ RUN dotnet publish src/Worker/Ditak.Attendance.Worker.csproj -c Release -o /app/
 FROM mcr.microsoft.com/dotnet/runtime:8.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
+ENV DOTNET_EnableDiagnostics=0
+USER $APP_UID
 ENTRYPOINT ["dotnet", "Ditak.Attendance.Worker.dll"]
